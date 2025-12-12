@@ -18,3 +18,64 @@ pd.set_option('display.float_format', lambda x: '%.2f' % x)
 
 print("Libraries imported successfully!")
 
+# Load the dataset
+df = pd.read_csv('accepted_2007_to_2018Q4_sample.csv', low_memory=False)
+
+print(f"Dataset Shape: {df.shape}")
+print(f"Number of Records: {df.shape[0]:,}")
+print(f"Number of Features: {df.shape[1]}")
+print("\n" + "="*50)
+print("First 5 rows:")
+df.head()
+
+# Dataset information
+print("Dataset Information:")
+print("="*50)
+df.info()
+
+# Check for missing values
+missing_data = pd.DataFrame({
+    'Column': df.columns,
+    'Missing_Count': df.isnull().sum(),
+    'Missing_Percentage': (df.isnull().sum() / len(df)) * 100
+})
+missing_data = missing_data[missing_data['Missing_Count'] > 0].sort_values('Missing_Percentage', ascending=False)
+
+print("Missing Values Summary:")
+print("="*70)
+print(f"Total columns with missing values: {len(missing_data)}")
+print("\nTop 20 columns with highest missing percentage:")
+print(missing_data.head(20))
+
+# Drop columns with more than 50% missing values
+threshold = 0.5
+cols_to_drop = missing_data[missing_data['Missing_Percentage'] > threshold * 100]['Column'].tolist()
+print(f"Dropping {len(cols_to_drop)} columns with >50% missing values")
+
+df_clean = df.drop(columns=cols_to_drop, errors='ignore')
+
+# Check for duplicates
+duplicates = df_clean.duplicated().sum()
+print(f"\nDuplicate rows: {duplicates}")
+
+# Remove duplicates if any
+if duplicates > 0:
+    df_clean = df_clean.drop_duplicates()
+    print(f"Removed {duplicates} duplicate rows")
+
+# Convert date columns to datetime
+date_columns = ['issue_d', 'earliest_cr_line', 'last_pymnt_d', 'last_credit_pull_d']
+for col in date_columns:
+    if col in df_clean.columns:
+        df_clean[col] = pd.to_datetime(df_clean[col], format='%b-%Y', errors='coerce')
+
+# Clean percentage columns (int_rate, revol_util)
+if 'int_rate' in df_clean.columns and df_clean['int_rate'].dtype == 'object':
+    df_clean['int_rate'] = df_clean['int_rate'].str.rstrip('%').astype('float') / 100.0
+
+if 'revol_util' in df_clean.columns and df_clean['revol_util'].dtype == 'object':
+    df_clean['revol_util'] = df_clean['revol_util'].str.rstrip('%').astype('float') / 100.0
+
+print(f"\nCleaned dataset shape: {df_clean.shape}")
+print("Data cleaning completed!")
+
