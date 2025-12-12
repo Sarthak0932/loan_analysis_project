@@ -1,0 +1,253 @@
+# Install d3rlpy if not already installed (uncomment to install)
+# !pip install d3rlpy
+
+# Import d3rlpy for offline RL
+try:
+    import d3rlpy
+    print(f"d3rlpy version: {d3rlpy.__version__}")
+except ImportError:
+    print("⚠️ d3rlpy not installed. Please install it using: pip install d3rlpy")
+    print("For now, we'll continue with reward engineering and data preparation.")
+# Create RL dataset from historical data
+# We assume all historical loans were approved (action = 1)
+# The dataset represents the outcomes of those approvals
+
+# Prepare RL data - use base features only (without encoded ones)
+base_rl_features = ['loan_amnt', 'int_rate', 'installment', 'annual_inc', 'dti',
+                    'open_acc', 'total_acc', 'revol_bal', 'revol_util',
+                    'fico_score_avg', 'income_to_loan_ratio', 'credit_history_years',
+                    'emp_length_years', 'delinq_2yrs', 'inq_last_6mths', 'pub_rec']
+
+# Filter to existing columns
+base_rl_features = [col for col in base_rl_features if col in df_clean.columns]
+
+# Create base dataframe with features and target (loan_amnt and int_rate already in base_rl_features)
+df_rl = df_clean[base_rl_features + ['target']].copy()
+
+# Add encoded features before dropping NaN
+if 'grade' in df_clean.columns:
+    df_rl['grade_encoded'] = le_grade.transform(df_clean['grade'].fillna('G'))
+if 'home_ownership' in df_clean.columns:
+    df_rl['home_encoded'] = le_home.transform(df_clean['home_ownership'].fillna('OTHER'))
+if 'purpose' in df_clean.columns:
+    df_rl['purpose_encoded'] = le_purpose.transform(df_clean['purpose'].fillna('other'))
+
+# Now drop NaN and reset index
+df_rl = df_rl.dropna().reset_index(drop=True)
+
+# Calculate rewards based on loan outcomes
+def calculate_reward(row):
+    """
+    Reward structure:
+    - Deny loan (action=0): reward = 0
+    - Approve loan (action=1):
+        - If Fully Paid: reward = loan_amnt * int_rate (profit from interest)
+        - If Defaulted: reward = -loan_amnt (loss of principal)
+    """
+    loan_amnt = row['loan_amnt']
+    int_rate = row['int_rate']
+    is_default = row['target']
+    
+    # Historical data has action = 1 (all loans were approved)
+    if is_default == 0:  # Fully Paid
+        return loan_amnt * int_rate
+    else:  # Defaulted
+        return -loan_amnt
+
+df_rl['reward'] = df_rl.apply(calculate_reward, axis=1)
+df_rl['action'] = 1  # All historical loans were approved
+
+# State features (same as DL model)
+state_features = [col for col in base_rl_features if col in df_rl.columns]
+if 'grade_encoded' in df_rl.columns:
+    state_features.append('grade_encoded')
+if 'home_encoded' in df_rl.columns:
+    state_features.append('home_encoded')
+if 'purpose_encoded' in df_rl.columns:
+    state_features.append('purpose_encoded')
+
+print("RL Dataset Prepared:")
+print(f"  Total samples: {len(df_rl):,}")
+print(f"  State dimension: {len(state_features)}")
+print(f"\nReward Statistics:")
+print(f"  Mean reward: ${df_rl['reward'].mean():,.2f}")
+print(f"  Median reward: ${df_rl['reward'].median():,.2f}")
+print(f"  Min reward: ${df_rl['reward'].min():,.2f}")
+print(f"  Max reward: ${df_rl['reward'].max():,.2f}")
+print(f"\nReward distribution:")
+print(f"  Positive rewards (loans paid): {(df_rl['reward'] > 0).sum():,} ({(df_rl['reward'] > 0).mean()*100:.2f}%)")
+print(f"  Negative rewards (defaults): {(df_rl['reward'] < 0).sum():,} ({(df_rl['reward'] < 0).mean()*100:.2f}%)")
+# Visualize reward distribution
+fig, axes = plt.subplots(1, 2, figsize=(15, 5))
+
+# Histogram of rewards
+axes[0].hist(df_rl['reward'], bins=50, edgecolor='black', alpha=0.7)
+axes[0].axvline(x=0, color='red', linestyle='--', linewidth=2, label='Break-even')
+axes[0].set_xlabel('Reward ($)')
+axes[0].set_ylabel('Frequency')
+axes[0].set_title('Distribution of Rewards', fontsize=14, fontweight='bold')
+axes[0].legend()
+axes[0].grid(alpha=0.3)
+
+# Cumulative reward
+cumulative_reward = df_rl['reward'].cumsum()
+axes[1].plot(cumulative_reward.values, linewidth=2)
+axes[1].set_xlabel('Loan Number')
+axes[1].set_ylabel('Cumulative Reward ($)')
+axes[1].set_title('Cumulative Reward Over Time', fontsize=14, fontweight='bold')
+axes[1].grid(alpha=0.3)
+axes[1].axhline(y=0, color='red', linestyle='--', linewidth=1)
+
+plt.tight_layout()
+plt.show()
+
+print(f"\nTotal cumulative reward from historical data: ${df_rl['reward'].sum():,.2f}")
+# Prepare data for d3rlpy
+# Note: d3rlpy requires (observations, actions, rewards, next_observations, terminals)
+
+# Split data for RL
+rl_train_size = int(0.8 * len(df_rl))
+df_rl_train = df_rl.iloc[:rl_train_size]
+df_rl_test = df_rl.iloc[rl_train_size:]
+
+# Extract components
+observations_train = df_rl_train[state_features].values.astype(np.float32)
+actions_train = df_rl_train['action'].values.astype(np.int32)
+rewards_train = df_rl_train['reward'].values.astype(np.float32)
+
+observations_test = df_rl_test[state_features].values.astype(np.float32)
+actions_test = df_rl_test['action'].values.astype(np.int32)
+rewards_test = df_rl_test['reward'].values.astype(np.float32)
+
+# Scale observations
+scaler_rl = StandardScaler()
+observations_train_scaled = scaler_rl.fit_transform(observations_train)
+observations_test_scaled = scaler_rl.transform(observations_test)
+
+print("RL Training Data:")
+print(f"  Observations shape: {observations_train_scaled.shape}")
+print(f"  Actions shape: {actions_train.shape}")
+print(f"  Rewards shape: {rewards_train.shape}")
+print(f"\nRL Test Data:")
+print(f"  Observations shape: {observations_test_scaled.shape}")
+# Train offline RL agent with d3rlpy (Discrete CQL algorithm)
+try:
+    from d3rlpy.algos import DiscreteCQLConfig
+    from d3rlpy.dataset import MDPDataset
+    
+    # Create dataset for d3rlpy using MDPDataset
+    # For offline RL with single-step episodes (each loan is independent)
+    
+    # Create transitions - each loan is a terminal single-step episode
+    terminals_train = np.ones(len(observations_train_scaled), dtype=np.float32)
+    terminals_test = np.ones(len(observations_test_scaled), dtype=np.float32)
+    
+    # Create MDPDataset (modern d3rlpy API)
+    dataset = MDPDataset(
+        observations=observations_train_scaled,
+        actions=actions_train,
+        rewards=rewards_train,
+        terminals=terminals_train
+    )
+    
+    print(f"Created MDPDataset with {len(observations_train_scaled)} transitions")
+    print(f"Observation shape: {observations_train_scaled.shape}")
+    print(f"Action space: Discrete (0=Deny, 1=Approve)")
+    
+    # Configure Discrete CQL algorithm
+    # d3rlpy expects device as string: 'cuda:0' or 'cpu'
+    device_str = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+    cql = DiscreteCQLConfig(
+        batch_size=256,
+        learning_rate=3e-4,
+    ).create(device=device_str)
+    
+    print(f"Using device: {device_str}")
+    print("\nTraining Discrete CQL agent...")
+    print("="*70)
+    
+    # Train the agent
+    cql.fit(
+        dataset,
+        n_steps=10000,
+        n_steps_per_epoch=1000,
+        show_progress=True
+    )
+    
+    print("\n✓ Offline RL agent training completed!")
+    
+except ImportError:
+    print(" d3rlpy not available. Skipping RL agent training.")
+    print("To run this section, install d3rlpy: pip install d3rlpy")
+    cql = None
+except Exception as e:
+    print(f"Error during RL training: {e}")
+    print("Continuing with alternative approach...")
+    cql = None
+# Evaluate the RL policy
+if cql is not None:
+    try:
+        # Predict actions using the trained policy
+        rl_actions = []
+        for obs in observations_test_scaled:
+            action = cql.predict(np.array([obs]))[0]
+            rl_actions.append(action)
+        rl_actions = np.array(rl_actions)
+        
+        # Calculate policy value (expected reward under the learned policy)
+        # For approved loans, use actual rewards; for denied loans, reward = 0
+        rl_policy_rewards = []
+        for i, action in enumerate(rl_actions):
+            if action == 1:  # Approve
+                rl_policy_rewards.append(rewards_test[i])
+            else:  # Deny
+                rl_policy_rewards.append(0.0)
+        
+        rl_policy_value = np.mean(rl_policy_rewards)
+        rl_total_value = np.sum(rl_policy_rewards)
+        
+        # Compare with baseline (approve all)
+        baseline_policy_value = np.mean(rewards_test)
+        baseline_total_value = np.sum(rewards_test)
+        
+        print("="*70)
+        print("OFFLINE RL AGENT - POLICY EVALUATION")
+        print("="*70)
+        print(f"\n📊 KEY METRIC (as required by assignment):")
+        print(f"  ✓ Estimated Policy Value (avg reward per loan): ${rl_policy_value:,.2f}")
+        print(f"  ✓ Total Policy Value (test set): ${rl_total_value:,.2f}")
+        print(f"\n📈 Baseline Comparison (approve all loans):")
+        print(f"  Baseline Policy Value: ${baseline_policy_value:,.2f}")
+        print(f"  Baseline Total Value: ${baseline_total_value:,.2f}")
+        print(f"  Improvement: ${rl_policy_value - baseline_policy_value:,.2f} per loan")
+        print(f"  Improvement %: {((rl_policy_value / baseline_policy_value) - 1) * 100:.2f}%")
+        print(f"\n🎯 Policy Actions:")
+        print(f"  Approve rate: {(rl_actions == 1).mean()*100:.2f}%")
+        print(f"  Deny rate: {(rl_actions == 0).mean()*100:.2f}%")
+        print("="*70)
+        
+    except Exception as e:
+        print(f"Error evaluating RL policy: {e}")
+        rl_actions = None
+else:
+    print("RL agent not trained. Using simulated policy based on risk thresholds...")
+    # Fallback: Create a risk-based policy
+    rl_actions = (test_probabilities < 0.3).astype(int)  # Approve if default prob < 30%
+    
+    rl_policy_rewards = []
+    for i, action in enumerate(rl_actions):
+        if action == 1:
+            rl_policy_rewards.append(rewards_test[i])
+        else:
+            rl_policy_rewards.append(0.0)
+    
+    rl_policy_value = np.mean(rl_policy_rewards)
+    baseline_policy_value = np.mean(rewards_test)
+    
+    print("="*70)
+    print("SIMULATED RL POLICY (Risk-Based)")
+    print("="*70)
+    print(f"Policy Value: ${rl_policy_value:,.2f}")
+    print(f"Baseline (approve all): ${baseline_policy_value:,.2f}")
+    print(f"Approve rate: {(rl_actions == 1).mean()*100:.2f}%")
+
