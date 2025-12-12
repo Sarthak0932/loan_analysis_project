@@ -1,0 +1,91 @@
+# Create comprehensive comparison table
+comparison_data = {
+    'Metric': ['AUC', 'F1-Score', 'Accuracy', 'Policy Value ($/loan)', 'Objective'],
+    'Deep Learning Model': [
+        f'{test_auc:.4f}',
+        f'{test_f1:.4f}',
+        f'{test_acc:.4f}',
+        'N/A (classification)',
+        'Predict default probability'
+    ],
+    'RL Agent': [
+        'N/A (not classification)',
+        'N/A (not classification)',
+        'N/A (decision-making)',
+        f'${rl_policy_value:,.2f}' if 'rl_policy_value' in locals() else 'Training required',
+        'Maximize financial return'
+    ]
+}
+
+comparison_df = pd.DataFrame(comparison_data)
+print("="*80)
+print("MODEL COMPARISON SUMMARY")
+print("="*80)
+# Compare policies: DL model (with threshold) vs RL agent
+# Need to get DL predictions on the RL test set for fair comparison
+dl_threshold = 0.5
+
+if 'rl_actions' in locals() and rl_actions is not None:
+    # Get DL model predictions on the same test set used by RL
+    with torch.no_grad():
+        model.eval()
+        rl_test_tensor = torch.FloatTensor(observations_test_scaled).to(device)
+        dl_predictions_on_rl_test = model(rl_test_tensor).squeeze().cpu().numpy()
+    
+    dl_policy_actions = (dl_predictions_on_rl_test < dl_threshold).astype(int)
+    
+    # Now compare the same test set
+    policy_differences = dl_policy_actions != rl_actions
+    num_differences = policy_differences.sum()
+    
+    print("="*80)
+    print("POLICY COMPARISON: Deep Learning vs Reinforcement Learning")
+    print("="*80)
+    print(f"\nTotal test samples: {len(rl_actions):,}")
+    print(f"Policy agreements: {(~policy_differences).sum():,} ({(~policy_differences).mean()*100:.2f}%)")
+    print(f"Policy disagreements: {num_differences:,} ({policy_differences.mean()*100:.2f}%)")
+    
+    # Analyze disagreements
+    if num_differences > 0:
+        print("\n" + "-"*80)
+        print("ANALYZING DISAGREEMENTS:")
+        print("-"*80)
+        
+        # Case 1: DL says deny (high risk), RL says approve
+        dl_deny_rl_approve = (dl_policy_actions == 0) & (rl_actions == 1)
+        if dl_deny_rl_approve.sum() > 0:
+            print(f"\n1. High-risk applicants that DL denies but RL approves: {dl_deny_rl_approve.sum():,}")
+            
+            # Get indices and analyze
+            indices = np.where(dl_deny_rl_approve)[0]
+            if len(indices) > 0:
+                sample_idx = indices[:5]  # Show first 5 examples
+                print("\nExamples of high-risk loans RL approves:")
+                for i, idx in enumerate(sample_idx):
+                    default_prob = dl_predictions_on_rl_test[idx]
+                    actual_reward = rewards_test[idx] if 'rewards_test' in locals() else 'N/A'
+                    actual_outcome = 'Defaulted' if actions_test[idx] == 1 else 'Fully Paid'  # Use RL test targets
+                    print(f"\n  Example {i+1}:")
+                    print(f"    - Default Probability (DL): {default_prob:.2%}")
+                    print(f"    - Potential Reward: ${actual_reward:,.2f}" if isinstance(actual_reward, (int, float)) else f"    - Potential Reward: {actual_reward}")
+                    print(f"    - Actual Outcome: {actual_outcome}")
+                
+                print("\n  💡 WHY RL APPROVES HIGH-RISK LOANS:")
+                print("     The RL agent considers the REWARD structure. Even with higher default")
+                print("     probability, if the loan amount is small or interest rate is high,")
+                print("     the expected return may still be positive, making it worth the risk.")
+        
+        # Case 2: DL says approve (low risk), RL says deny
+        dl_approve_rl_deny = (dl_policy_actions == 1) & (rl_actions == 0)
+        if dl_approve_rl_deny.sum() > 0:
+            print(f"\n2. Low-risk applicants that DL approves but RL denies: {dl_approve_rl_deny.sum():,}")
+            print("\n  💡 WHY RL DENIES LOW-RISK LOANS:")
+            print("     The RL agent learned that some low-default-probability loans may not be")
+            print("     profitable (e.g., small loan amounts with low interest rates). It optimizes")
+            print("     for profit, not just risk avoidance.")
+    
+    print("\n" + "="*80)
+else:
+    print("RL agent actions not available. Skipping policy comparison.")
+print(comparison_df.to_string(index=False))
+print("="*80)
