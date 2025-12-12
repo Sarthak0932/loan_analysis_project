@@ -1,0 +1,119 @@
+# Statistical summary of numerical columns
+print("Statistical Summary of Key Numerical Features:")
+print("="*70)
+key_numeric_cols = ['loan_amnt', 'funded_amnt', 'int_rate', 'installment', 
+                     'annual_inc', 'dti', 'open_acc', 'total_acc', 'revol_bal', 'revol_util']
+key_numeric_cols = [col for col in key_numeric_cols if col in df_clean.columns]
+df_clean[key_numeric_cols].describe()
+# Categorical features analysis
+print("Categorical Features Analysis:")
+print("="*70)
+
+categorical_cols = ['term', 'grade', 'sub_grade', 'home_ownership', 'verification_status', 
+                    'loan_status', 'purpose', 'addr_state']
+categorical_cols = [col for col in categorical_cols if col in df_clean.columns]
+
+for col in categorical_cols[:5]:  # Show first 5 categorical columns
+    print(f"\n{col.upper()}:")
+    print(df_clean[col].value_counts().head(10))
+# Distribution of loan amounts
+fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+
+# Loan amount distribution
+axes[0, 0].hist(df_clean['loan_amnt'].dropna(), bins=50, edgecolor='black', alpha=0.7)
+axes[0, 0].set_title('Distribution of Loan Amounts', fontsize=14, fontweight='bold')
+axes[0, 0].set_xlabel('Loan Amount ($)')
+axes[0, 0].set_ylabel('Frequency')
+axes[0, 0].grid(alpha=0.3)
+
+# Interest rate distribution
+axes[0, 1].hist(df_clean['int_rate'].dropna(), bins=50, edgecolor='black', alpha=0.7, color='coral')
+axes[0, 1].set_title('Distribution of Interest Rates', fontsize=14, fontweight='bold')
+axes[0, 1].set_xlabel('Interest Rate')
+axes[0, 1].set_ylabel('Frequency')
+axes[0, 1].grid(alpha=0.3)
+
+# Annual income distribution (log scale)
+axes[1, 0].hist(np.log10(df_clean['annual_inc'].dropna() + 1), bins=50, edgecolor='black', alpha=0.7, color='green')
+axes[1, 0].set_title('Distribution of Annual Income (Log Scale)', fontsize=14, fontweight='bold')
+axes[1, 0].set_xlabel('Log10(Annual Income)')
+axes[1, 0].set_ylabel('Frequency')
+axes[1, 0].grid(alpha=0.3)
+
+# DTI distribution
+axes[1, 1].hist(df_clean['dti'].dropna(), bins=50, edgecolor='black', alpha=0.7, color='purple')
+axes[1, 1].set_title('Distribution of Debt-to-Income Ratio', fontsize=14, fontweight='bold')
+axes[1, 1].set_xlabel('DTI')
+axes[1, 1].set_ylabel('Frequency')
+axes[1, 1].grid(alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+# Categorical features visualization
+fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+
+# Loan Grade distribution
+if 'grade' in df_clean.columns:
+    grade_counts = df_clean['grade'].value_counts().sort_index()
+    axes[0, 0].bar(grade_counts.index, grade_counts.values, edgecolor='black', alpha=0.7)
+    axes[0, 0].set_title('Loan Distribution by Grade', fontsize=14, fontweight='bold')
+    axes[0, 0].set_xlabel('Grade')
+    axes[0, 0].set_ylabel('Count')
+    axes[0, 0].grid(alpha=0.3, axis='y')
+
+# Home ownership distribution
+if 'home_ownership' in df_clean.columns:
+    home_counts = df_clean['home_ownership'].value_counts().head(6)
+    axes[0, 1].bar(home_counts.index, home_counts.values, edgecolor='black', alpha=0.7, color='coral')
+    axes[0, 1].set_title('Loan Distribution by Home Ownership', fontsize=14, fontweight='bold')
+    axes[0, 1].set_xlabel('Home Ownership')
+    axes[0, 1].set_ylabel('Count')
+    axes[0, 1].tick_params(axis='x', rotation=45)
+    axes[0, 1].grid(alpha=0.3, axis='y')
+
+# Loan purpose distribution
+if 'purpose' in df_clean.columns:
+    purpose_counts = df_clean['purpose'].value_counts().head(10)
+    axes[1, 0].barh(purpose_counts.index, purpose_counts.values, edgecolor='black', alpha=0.7, color='green')
+    axes[1, 0].set_title('Top 10 Loan Purposes', fontsize=14, fontweight='bold')
+    axes[1, 0].set_xlabel('Count')
+    axes[1, 0].set_ylabel('Purpose')
+    axes[1, 0].grid(alpha=0.3, axis='x')
+
+# Loan status distribution
+if 'loan_status' in df_clean.columns:
+    status_counts = df_clean['loan_status'].value_counts().head(10)
+    axes[1, 1].barh(status_counts.index, status_counts.values, edgecolor='black', alpha=0.7, color='purple')
+    axes[1, 1].set_title('Loan Status Distribution', fontsize=14, fontweight='bold')
+    axes[1, 1].set_xlabel('Count')
+    axes[1, 1].set_ylabel('Loan Status')
+    axes[1, 1].grid(alpha=0.3, axis='x')
+
+plt.tight_layout()
+plt.show()
+# Time series analysis - Loans issued over time
+if 'issue_d' in df_clean.columns:
+    df_clean['issue_year'] = df_clean['issue_d'].dt.year
+    df_clean['issue_quarter'] = df_clean['issue_d'].dt.quarter
+    
+    # Loans by year
+    fig, axes = plt.subplots(1, 2, figsize=(15, 5))
+    
+    yearly_loans = df_clean.groupby('issue_year').size()
+    axes[0].plot(yearly_loans.index, yearly_loans.values, marker='o', linewidth=2, markersize=8)
+    axes[0].set_title('Number of Loans Issued by Year', fontsize=14, fontweight='bold')
+    axes[0].set_xlabel('Year')
+    axes[0].set_ylabel('Number of Loans')
+    axes[0].grid(alpha=0.3)
+    
+    # Average loan amount by year
+    yearly_avg_amount = df_clean.groupby('issue_year')['loan_amnt'].mean()
+    axes[1].plot(yearly_avg_amount.index, yearly_avg_amount.values, marker='s', 
+                 linewidth=2, markersize=8, color='coral')
+    axes[1].set_title('Average Loan Amount by Year', fontsize=14, fontweight='bold')
+    axes[1].set_xlabel('Year')
+    axes[1].set_ylabel('Average Loan Amount ($)')
+    axes[1].grid(alpha=0.3)
+    
+    plt.tight_layout()
+    plt.show()
